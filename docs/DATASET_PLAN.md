@@ -1,39 +1,38 @@
-# GraphIntel Dataset Plan
+# Dataset Plan
 
-## Goal
+GraphIntel ships with a reproducible demo corpus that exercises graph-based
+support and incident reasoning without exposing private customer data.
 
-GraphIntel must ship with a reproducible local demo dataset. The dataset should
-prove graph reasoning across customers, tickets, incidents, services, teams,
-SLA clauses, postmortems, and runbooks.
+## Goals
 
-## Data Sources
+- Provide enough data to demonstrate ingestion, extraction, graph traversal,
+  vector retrieval, cited answers, and evaluation.
+- Keep generated data reproducible from scripts.
+- Track only stable fixtures in Git; keep downloaded and generated corpora out
+  of the repository.
+- Avoid confidential, personal, credential, or customer-private data.
 
-Use this priority order:
+## Data Pipeline
 
-1. Public support ticket datasets where licensing allows.
-2. Public status page incident feeds or exported incident JSON where available.
-3. Public postmortems and outage writeups where licensing allows.
-4. Synthetic fallback data for anything private or unavailable.
+| Script | Purpose |
+| --- | --- |
+| `scripts/download_datasets.py` | Attempts public-source downloads where licensing permits |
+| `scripts/generate_synthetic_demo_data.py` | Creates deterministic synthetic support and incident data |
+| `scripts/prepare_demo_data.py` | Orchestrates download, fallback generation, processing, and fixtures |
+| `scripts/validate_demo_data.py` | Validates counts, schema expectations, and golden-question support |
 
-## Required Scripts
+## Directory Policy
 
-Create these scripts in the implementation project:
+| Directory | Git policy | Contents |
+| --- | --- | --- |
+| `data/fixtures` | tracked | Small stable fixtures used by tests and evaluation |
+| `data/raw` | ignored except `.gitkeep` | Downloaded public source material |
+| `data/synthetic` | ignored except `.gitkeep` | Generated synthetic source records |
+| `data/processed` | ignored except `.gitkeep` | Processed import corpus |
 
-- `scripts/download_datasets.py`
-- `scripts/generate_synthetic_demo_data.py`
-- `scripts/prepare_demo_data.py`
-- `scripts/validate_demo_data.py`
+## Minimum Corpus
 
-## Required Folders
-
-- `data/raw`
-- `data/synthetic`
-- `data/processed`
-- `data/fixtures`
-
-## Minimum Dataset
-
-| Type | Count |
+| Entity or document type | Minimum count |
 | --- | ---: |
 | Customers | 5 |
 | Support tickets | 50 |
@@ -49,13 +48,14 @@ Create these scripts in the implementation project:
 
 ## Synthetic Data Requirements
 
-Synthetic data must include stable IDs and explicit source labels:
+Synthetic records should use stable IDs and explicit provenance fields, for
+example:
 
 - `synthetic: true`
 - `source_rule`
 - `created_by_script`
 
-Synthetic examples:
+Representative IDs:
 
 - `CUST-acme`
 - `SUP-0884`
@@ -67,7 +67,7 @@ Synthetic examples:
 
 ## Golden Questions
 
-The dataset must support these questions:
+The demo corpus must support these regression questions:
 
 1. Which customers were affected by Payment API incidents in the last 30 days?
 2. Is Acme Corp at SLA risk because of checkout or payment incidents?
@@ -77,10 +77,21 @@ The dataset must support these questions:
 
 ## Failure Behavior
 
-If public downloads fail, scripts must:
+If a public download fails, the pipeline should:
 
-1. Log the failed URL or dataset name.
-2. Continue with synthetic fallback data.
-3. Produce a complete local demo dataset.
-4. Print a clear summary of which sources were real and which were synthetic.
+1. Log the failed source.
+2. Continue with deterministic synthetic fallback data.
+3. Produce a complete local demo corpus.
+4. Print a summary of real versus synthetic sources.
 
+## Validation
+
+Run:
+
+```bash
+python scripts/prepare_demo_data.py
+python scripts/validate_demo_data.py
+```
+
+The validation script should fail when required counts, fixture files, or
+golden-question expectations are missing.

@@ -1,57 +1,87 @@
-# GraphIntel Test Strategy
+# Testing Strategy
 
-Testing is a product feature, not an afterthought. Every layer runs offline and
-deterministically (SQLite + in-process graph + hashed embeddings + templated
-answers), so the whole suite is reproducible in CI with no external services.
+GraphIntel's test suite is designed to run offline and deterministically. Local
+and CI tests use SQLite, the SQL graph mirror, deterministic embeddings, and
+deterministic answer/extraction fallbacks.
 
-## Backend (pytest)
+## Backend
 
-Located in `backend/tests`. Run with:
+Run:
 
 ```bash
 pip install -e ".[dev,llm]"
 pytest -q
+ruff check backend scripts
 ```
 
-Fixtures (`conftest.py`) bind the SQLAlchemy engine to a throwaway SQLite file
-before any app import, recreate the schema per test, and provide:
+The backend suite currently contains 50 tests covering:
 
-- `session` — empty schema + ORM session (unit tests).
-- `seeded_session` — full demo corpus ingested through the real pipeline.
-- `client` / `seeded_client` — FastAPI `TestClient` (empty / seeded).
-
-Coverage by area (happy path **and** at least one failure path each, per the
-Definition of Done):
-
-| Suite | Happy path | Failure path |
-| --- | --- | --- |
-| `test_ingestion.py` | CSV tickets ingest, chunk, embed | malformed row recorded, empty file → failed, invalid JSON → failed |
-| `test_extraction.py` | incident → entities/relations, mention linking | unknown kind → error, unknown id ignored |
-| `test_graph.py` | multi-hop expand, filtered traversal, merge repoint, manual add | ontology violation rejected, double-delete no-op |
-| `test_retrieval_answer.py` | 5 golden questions grounded (params) | out-of-domain refusal; cold==warm determinism |
-| `test_evaluation.py` | all golden pass, gate PASS | no-data → 5 refusals → gate FAIL |
-| `test_api.py` | health, seed/stats, ask, entity edit/merge, relation delete, graph expand, eval | 404s, 400 empty question, 415 bad upload, 422 ontology |
-
-### Regression guardrails
-
-- **Golden-question regression** (`test_retrieval_answer.py`) is parametrized
-  over `data/fixtures/golden_questions.json`. Each question must be answered
-  (not refused), expose citations and a graph reasoning path, surface every
-  expected entity, and contain every expected reasoning edge.
-- **Release gate** (`test_evaluation.py`) asserts the seeded corpus yields a
-  `PASS` and an empty corpus yields a `FAIL`.
-- **Determinism** — a cold service and a warm service must return identical
-  chunk rankings and scores (protects the "visible, reproducible reasoning"
-  product principle).
+| Area | Coverage |
+| --- | --- |
+| Configuration | production safety checks, placeholder key rejection, managed-environment requirements |
+| Ingestion | CSV, JSON, text, chunking, embeddings, job state, row/file failures |
+| Extraction | deterministic extraction, entity/relation parsing, unsupported kinds |
+| Graph | ontology validation, traversal, filtered expansion, relation deletion, manual relation add, entity merge |
+| Retrieval and answers | golden questions, citations, reasoning paths, refusal behavior, determinism |
+| Evaluation | golden-question runs, release-gate PASS/FAIL behavior |
+| API | health, readiness, seed/stats, ask, uploads, graph review, evaluation endpoints |
+| Vector providers | deterministic, Voyage request shape, FastEmbed/Bedrock provider selection behavior |
 
 ## Frontend
 
-Vitest + React Testing Library for component/unit tests and Playwright for an
-e2e smoke spec (see `frontend/`). The e2e spec expects the backend running at
-`NEXT_PUBLIC_API_BASE`.
+Run:
+
+```bash
+cd frontend
+npm install
+npm run test
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Frontend coverage uses Vitest and React Testing Library for unit/component tests.
+The Playwright smoke spec is available with:
+
+```bash
+npx playwright install
+npm run e2e
+```
+
+The e2e run expects the frontend and backend to be running. Use `E2E_BASE_URL`
+when targeting a non-default frontend URL.
+
+## Data Validation
+
+Run:
+
+```bash
+python scripts/prepare_demo_data.py
+python scripts/validate_demo_data.py
+```
+
+The data validation path checks that the demo corpus supports the golden
+questions and minimum fixture expectations.
 
 ## CI
 
-`.github/workflows/ci.yml` runs ruff, the pytest suite, a build of the API
-image, and (when the frontend deps resolve) the frontend unit tests. The demo
-data pipeline is validated by `scripts/validate_demo_data.py`.
+`.github/workflows/ci.yml` runs:
+
+- Python install
+- Ruff
+- demo-data preparation and validation
+- pytest
+- API Docker image build
+- Terraform format and validation
+- frontend install and tests
+
+The workflow is intended to run without production credentials.
+
+## Regression Guardrails
+
+- Golden-question tests assert that expected entities and reasoning edges remain
+  retrievable.
+- The release gate must pass on seeded data and fail on empty data.
+- Deterministic retrieval protects repeatability between cold and warm service
+  instances.
+- Production safety tests reject unsafe managed-environment configurations.

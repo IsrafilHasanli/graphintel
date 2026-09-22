@@ -1,164 +1,225 @@
 # GraphIntel
 
-A production-grade **Graph RAG platform for Support & Incident Intelligence**.
-GraphIntel ingests support tickets, incident reports, postmortems, runbooks,
-service-ownership data, and SLA documents; extracts entities and relationships
-into a knowledge graph; builds a vector index over document chunks; and answers
-operational questions using **hybrid graph + vector retrieval** — always with
-citations, a visible reasoning path, a confidence label, and refusal when the
-evidence is weak.
+GraphIntel is a Graph RAG platform for support and incident intelligence. It
+ingests operational documents, extracts entities and relationships, builds a
+queryable knowledge graph, and answers questions with citations, reasoning
+paths, confidence labels, and refusal behavior when evidence is insufficient.
 
-The local developer stack can run fully offline with zero external services:
-SQLite, a SQL-backed local graph, deterministic hash embeddings, and deterministic
-answer/extraction fallbacks. AWS staging/production is deliberately real:
-PostgreSQL/pgvector, Amazon Neptune, real embeddings, and a real LLM provider.
+The project is designed to be easy to run locally and realistic to deploy:
+local development uses SQLite, a SQL-backed graph mirror, deterministic
+embeddings, and deterministic answer/extraction fallbacks; AWS staging and
+production are expected to use PostgreSQL/pgvector, Amazon Neptune, managed
+Redis, real embeddings, and a real LLM provider.
 
-## Highlights
+## Features
 
-- **Source-grounded answers only.** Every response exposes its citations
-  (chunk snippets + entity nodes) and the exact graph path used to reason.
-- **Graph traversal is first-class**, not an add-on: query → entity linking →
-  multi-hop expansion → vector search → merge/rerank → grounded answer.
-- **Correction workflows**: edit entities, merge duplicates, add/delete
-  relations with ontology validation and an audit trail.
-- **Evaluation built in**: a golden-question harness and a release gate
-  (PASS / CONDITIONAL / FAIL) that ships as part of the product.
-- **Deterministic tests, real production**: CI stays offline and reproducible;
-  AWS staging/production must not use mock LLMs, hash embeddings, SQLite, or
-  in-memory graph storage.
+- Source-grounded answers with citations and visible graph reasoning paths.
+- Hybrid retrieval that combines entity linking, graph expansion, vector search,
+  merge/rerank logic, and grounded answer generation.
+- Human review workflows for entity edits, duplicate merges, relation changes,
+  ontology validation, and audit history.
+- Deterministic local demo data and golden-question evaluation.
+- Offline CI path for backend tests, data validation, linting, Docker builds,
+  Terraform validation, and frontend tests.
+- AWS infrastructure-as-code for ECS Fargate, RDS PostgreSQL, Amazon Neptune,
+  ElastiCache Redis, S3, ECR, ALB, Secrets Manager, and CloudWatch.
 
 ## Architecture
 
-```
-        Next.js UI  ───────────────►  FastAPI  ───────────────►  Retrieval
-   (ask · graph explorer ·          (typed REST)            ┌─ QueryAnalyzer (intent, entities, time)
-    entities · jobs · eval)                                 ├─ Graph expand (multi-hop, intent-scoped)
-                                                            ├─ Vector search (graph-anchored + global)
-   Ingestion ─► Extraction ─► Graph + Vector stores         ├─ Merge / rerank
-   (jobs)       (rules/LLM)   (Neptune│SQL, pgvector│hash)   └─ Answer (citations, path, confidence, refusal)
-```
-
-- **Relational/Vector**: PostgreSQL + pgvector in production; SQLite offline.
-- **Graph**: Amazon Neptune in AWS staging/production; SQL-backed graph offline.
-- **Embeddings/LLM**: deterministic for local tests; Anthropic Claude for
-  generation/extraction and Bedrock or Voyage for production embeddings.
-
-## Repository layout
-
-```
-backend/app/
-  api/routers/     ingestion · graph · ask · evaluation · admin
-  services/        ingestion · extraction · retrieval · answer · evaluation · seed
-  models.py schemas.py domain.py graph.py vector.py config.py main.py
-backend/tests/     41 tests (happy + failure paths, golden regression, release gate)
-frontend/          Next.js 16 · React 19 · TS · Tailwind · React Flow (8 routes)
-scripts/           download_datasets · generate_synthetic_demo_data · prepare_demo_data · validate_demo_data
-data/              raw/ · synthetic/ · processed/ · fixtures/ (incl. golden_questions.json)
-infra/             terraform/ (ECS Fargate stack) · smoke_test.sh · README (runbook)
-.github/workflows/ ci.yml (offline) · deploy.yml (no-op until configured)
-docs/              architecture · dataset plan · testing · AWS deployment plan · user stories
+```mermaid
+flowchart LR
+    UI[Next.js UI] --> API[FastAPI API]
+    API --> ING[Ingestion]
+    ING --> EXT[Extraction]
+    EXT --> GRAPH[Graph Store]
+    EXT --> VECTOR[Vector Store]
+    API --> RET[Hybrid Retrieval]
+    RET --> GRAPH
+    RET --> VECTOR
+    RET --> ANSWER[Answer Service]
+    ANSWER --> API
 ```
 
-## Quick start (fully offline, no external services)
+| Layer | Local development | AWS staging/production |
+| --- | --- | --- |
+| API | FastAPI | ECS Fargate behind ALB |
+| Frontend | Next.js | ECS Fargate standalone Next.js app |
+| Relational data | SQLite or PostgreSQL | RDS PostgreSQL |
+| Graph traversal | SQL-backed graph mirror | Amazon Neptune |
+| Vectors | Deterministic hash embeddings | pgvector with Bedrock/FastEmbed/Voyage embeddings |
+| LLM | Deterministic fallback | Anthropic Claude or another configured provider |
+| Queue/cache | Redis container | ElastiCache Redis |
+
+## Repository Structure
+
+```text
+backend/
+  app/
+    api/routers/      REST endpoints
+    services/         ingestion, extraction, retrieval, answer, evaluation
+    config.py         typed environment-driven settings
+    graph.py          SQL graph mirror and Neptune adapter
+    vector.py         embedding providers and vector search
+  tests/              backend test suite
+frontend/             Next.js 16, React 19, TypeScript, Tailwind, React Flow
+scripts/              demo data download/generation/validation
+data/                 tracked fixtures plus ignored generated data folders
+docs/                 architecture, deployment, testing, dataset notes
+infra/terraform/      AWS infrastructure
+.github/workflows/    CI and gated deploy workflows
+```
+
+## Prerequisites
+
+- Python 3.11+
+- Node.js 20+
+- Docker Desktop, for containerized local runs and image builds
+- Terraform 1.5+, only when validating or deploying AWS infrastructure
+
+## Quick Start
+
+Run the backend fully offline:
 
 ```bash
 pip install -e ".[dev,llm]"
-python scripts/prepare_demo_data.py                 # build reproducible demo corpus
+python scripts/prepare_demo_data.py
 uvicorn app.main:app --app-dir backend --port 8000
 ```
 
-Then, in another shell — seed and exercise the critical path:
+Seed demo data and run a smoke test from another shell:
 
 ```bash
-curl -X POST http://localhost:8000/admin/seed        # load the demo knowledge graph
-BASE=http://localhost:8000 bash infra/smoke_test.sh  # health → seed → ask → release gate
+curl -X POST http://localhost:8000/admin/seed
+BASE=http://localhost:8000 bash infra/smoke_test.sh
 ```
 
-Ask a question:
+Ask a grounded question:
 
 ```bash
-curl -X POST http://localhost:8000/ask -H 'Content-Type: application/json' \
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
   -d '{"question":"Which engineering team owns the service involved in INC-247?"}'
 ```
 
-Interactive API docs are served at `http://localhost:8000/docs`.
+Interactive API documentation is available at `http://localhost:8000/docs`.
 
-### Frontend
+## Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:3000 (expects the API at NEXT_PUBLIC_API_BASE)
+npm run dev
 ```
 
-Screens: dashboard, document upload, ingestion jobs, **ask** (confidence badge,
-citations, reasoning path, actions, limitations), **graph explorer** (React
-Flow), **entity review** (edit/merge/relations), and **evaluation**. Every data
-view has loading / empty / error / success states; answers additionally render
-partial-evidence and refusal states.
+The frontend defaults to `NEXT_PUBLIC_API_BASE=http://localhost:8000`. Copy
+`frontend/.env.local.example` to `frontend/.env.local` only when the backend is
+running elsewhere.
 
-### Full container stack
+## Docker Compose
 
-Runs the API, web, PostgreSQL/pgvector, and Redis together:
+The local Compose stack runs API, web, PostgreSQL/pgvector, and Redis:
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-## API surface
+Production graph traversal is Amazon Neptune; local graph traversal uses the
+SQL-backed mirror.
+
+## Configuration
+
+Configuration is environment-driven through `backend/app/config.py`.
+
+Important variables:
+
+| Variable | Local default | Production expectation |
+| --- | --- | --- |
+| `GRAPHINTEL_ENV` | `local` | `staging` or `production` |
+| `DATABASE_URL` | optional SQLite override | RDS PostgreSQL DSN from Secrets Manager |
+| `GRAPH_BACKEND` | `sql` | `neptune` |
+| `NEPTUNE_ENDPOINT` | empty | Terraform Neptune endpoint output |
+| `LLM_PROVIDER` | `deterministic` | real provider, for example `anthropic` |
+| `EXTRACTION_PROVIDER` | `deterministic` | `llm` |
+| `EMBEDDING_PROVIDER` | `deterministic` | `bedrock`, `fastembed`, or `voyage` |
+| `CORS_ALLOW_ORIGINS` | `*` | explicit production frontend origins |
+
+Use [.env.example](.env.example) as the template. Do not commit `.env` files or
+real credentials.
+
+## API Surface
 
 | Area | Endpoints |
 | --- | --- |
 | Ingestion | `POST /ingest/upload`, `POST /ingest/text`, `GET /jobs`, `GET /documents`, `GET /documents/{id}/chunks` |
-| Graph | `GET/PATCH /entities`, `POST /entities/merge`, `GET/POST/DELETE /relations`, `GET /graph`, `GET /graph/expand` |
-| Ask | `POST /ask`, `GET /answers/{id}` |
+| Graph review | `GET/PATCH /entities`, `POST /entities/merge`, `GET/POST/DELETE /relations`, `GET /graph`, `GET /graph/expand` |
+| Question answering | `POST /ask`, `GET /answers/{id}` |
 | Evaluation | `POST /eval/run`, `GET /eval/latest`, `GET /eval/release-gate` |
 | Admin/meta | `POST /admin/seed`, `GET /admin/stats`, `GET /audits`, `GET /health`, `GET /ready` |
 
-## Demo data pipeline
+## Demo Data
 
-`scripts/prepare_demo_data.py` attempts to download public support/incident data,
-falls back to deterministic synthetic generation (logging any failed source),
-and writes to `data/{raw,synthetic,processed,fixtures}`. The seed corpus supports
-five **golden Graph RAG questions** used by the evaluation harness. Validate with
-`python scripts/validate_demo_data.py`.
+`scripts/prepare_demo_data.py` attempts public downloads, falls back to
+deterministic synthetic data when needed, and writes ignored generated artifacts
+under `data/raw`, `data/synthetic`, and `data/processed`. The tracked fixtures
+under `data/fixtures` support regression tests and evaluation.
+
+```bash
+python scripts/prepare_demo_data.py
+python scripts/validate_demo_data.py
+```
+
+Generated datasets are intentionally ignored by Git to keep the public
+repository small and reproducible.
 
 ## Testing
 
 ```bash
-pytest -q            # 41 backend tests
+pytest -q
 ruff check backend scripts
+
+cd frontend
+npm install
+npm run test
+npm run typecheck
+npm run lint
+npm run build
 ```
 
-Coverage spans ingestion, extraction, graph correction, hybrid retrieval, the
-five golden questions (grounding + determinism), the release gate, and the full
-API contract — each with a happy path and at least one failure path. See
-[`docs/testing.md`](docs/testing.md). The frontend has Vitest unit tests and a
-Playwright e2e smoke spec.
+The backend suite currently contains 50 deterministic tests covering ingestion,
+extraction, graph operations, retrieval, answer generation, evaluation, config
+safety checks, and API behavior.
 
-## Deploy to AWS
+## Deployment
 
-Infrastructure-as-code (ECS Fargate + RDS/pgvector + ElastiCache Redis + S3 +
-ECR + ALB + Secrets Manager + CloudWatch) and CI/CD live in `infra/` — see
-[`infra/README.md`](infra/README.md) for the architecture diagram, deploy steps,
-and the operations runbook (rollback, backup/restore, teardown).
+AWS deployment assets live in [infra](infra). The target architecture uses ECS
+Fargate, RDS PostgreSQL, Amazon Neptune, ElastiCache Redis, S3, ECR, ALB,
+Secrets Manager, and CloudWatch.
 
-> **Local development never requires AWS credentials.** Terraform validates
-> offline (`terraform init -backend=false && terraform validate`) and the deploy
-> workflow is a no-op until a deploy role is configured.
+The deploy workflow is intentionally gated: it is a no-op until repository
+variables and an OIDC deploy role are configured. Local development never
+requires AWS credentials.
 
-- **CI** (`.github/workflows/ci.yml`): ruff, pytest, demo-data validation,
-  Docker build, `terraform validate`, and frontend unit tests — all offline.
-- **Deploy** (`.github/workflows/deploy.yml`): build → push ECR → roll out ECS
-  (with circuit-breaker auto-rollback) → smoke test, gated on a configured
-  deploy role.
+## Security
+
+- No production secrets are committed.
+- `.env`, Terraform state, local databases, dependency folders, and build
+  outputs are ignored.
+- Managed environments reject SQLite, deterministic providers, wildcard CORS,
+  missing Neptune configuration, and placeholder provider keys.
+- Store production credentials in AWS Secrets Manager or an equivalent secret
+  manager.
 
 ## Documentation
 
-- [`docs/architecture/GRAPHINTEL_ARCHITECTURE.md`](docs/architecture/GRAPHINTEL_ARCHITECTURE.md) — technical architecture
-- [`docs/DATASET_PLAN.md`](docs/DATASET_PLAN.md) — dataset acquisition & generation
-- [`docs/testing.md`](docs/testing.md) — test strategy & regression guardrails
-- [`docs/deployment/AWS_DEPLOYMENT_PLAN.md`](docs/deployment/AWS_DEPLOYMENT_PLAN.md) — AWS deployment plan
-- [`docs/user-stories/GRAPHINTEL_USER_STORIES.md`](docs/user-stories/GRAPHINTEL_USER_STORIES.md) — product backlog
-- `claude_moved/` — archived Claude Code development material; not required at runtime
+- [Architecture](docs/architecture/GRAPHINTEL_ARCHITECTURE.md)
+- [Dataset plan](docs/DATASET_PLAN.md)
+- [Testing](docs/testing.md)
+- [AWS deployment plan](docs/deployment/AWS_DEPLOYMENT_PLAN.md)
+- [Infrastructure runbook](infra/README.md)
+- [Frontend documentation](frontend/README.md)
+
+## License
+
+No license file is currently included. Add a license before distributing or
+accepting external contributions.

@@ -1,68 +1,85 @@
 # GraphIntel Architecture
 
-## Overview
+## Purpose
 
-GraphIntel is a Graph RAG platform for support and incident intelligence. It
-combines a knowledge graph, vector retrieval, source-grounded answer generation,
-and human review workflows.
+GraphIntel is a Graph RAG application for operational support intelligence. It
+links support tickets, incidents, services, teams, runbooks, postmortems, SLA
+clauses, and root causes into a graph, then combines graph traversal with vector
+retrieval to answer operational questions from evidence.
 
-## Services
+## System Context
 
-| Service | Responsibility |
+```mermaid
+flowchart LR
+    Operator[Support / SRE operator] --> Web[Next.js web app]
+    Web --> API[FastAPI API]
+    API --> DB[(PostgreSQL / SQLite)]
+    API --> Graph[(Amazon Neptune / SQL mirror)]
+    API --> Embeddings[Embedding provider]
+    API --> LLM[LLM provider]
+```
+
+Local development uses SQLite, the SQL graph mirror, deterministic embeddings,
+and deterministic answer/extraction fallbacks. Staging and production should use
+managed services: RDS PostgreSQL, Amazon Neptune, real embeddings, and a real
+LLM provider.
+
+## Backend Modules
+
+| Module | Responsibility |
 | --- | --- |
-| API Service | HTTP endpoints, auth boundary, request validation |
-| Ingestion Service | Parse files, normalize records, create chunks |
-| Extraction Service | Extract entities and relations from chunks |
-| Graph Service | Upsert graph nodes and relations |
-| Vector Service | Embed and search chunks/entities |
-| Retrieval Service | Query analysis, entity linking, graph expansion, reranking |
-| Answer Service | Generate cited answers and limitations |
-| Evaluation Service | Run golden question sets and metrics |
-| Frontend App | Dashboard, upload, ask, graph explorer, review, evals |
+| `api/routers` | HTTP routes for ingestion, graph review, asking questions, evaluation, and admin actions |
+| `services/ingestion.py` | Normalizes uploaded or imported records, creates documents and chunks |
+| `services/extraction.py` | Extracts entities and relations with deterministic or LLM-backed providers |
+| `graph.py` | Defines the graph-store interface, SQL graph mirror, Neptune adapter, and traversal behavior |
+| `vector.py` | Embedding providers and in-process vector search abstraction |
+| `services/retrieval.py` | Query planning, entity linking, graph expansion, vector search, and reranking |
+| `services/answer.py` | Evidence packaging, answer generation, confidence, citations, and refusal behavior |
+| `services/evaluation.py` | Golden-question evaluation and release-gate status |
+| `config.py` | Typed, environment-driven settings and production safety checks |
 
-## Storage
+## Storage Model
 
-| Store | Data |
-| --- | --- |
-| PostgreSQL | Users, documents, chunks, jobs, answers, audits, eval runs |
-| Amazon Neptune | Entities and relations in staging/production |
-| SQL graph mirror | Offline/local entity-relation traversal |
-| pgvector | Chunk embeddings and optional entity embeddings |
-| Object storage | Raw uploads and parsed artifacts |
+| Store | Local | Production |
+| --- | --- | --- |
+| Documents, chunks, jobs, answers, audits | SQLite | RDS PostgreSQL |
+| Graph traversal | SQL graph mirror | Amazon Neptune |
+| Chunk embeddings | JSON vectors / deterministic provider | pgvector-compatible storage and real embeddings |
+| Raw files | Local generated data folders | S3 |
 
-## Retrieval Sequence
+The SQL graph mirror is retained locally for deterministic testing and offline
+development. Neptune is the production graph backend.
 
-1. User submits a question.
-2. Query analyzer extracts intent, entities, time range, and evidence needs.
-3. Entity linker maps query mentions to graph nodes.
-4. Graph retriever expands relevant neighborhoods.
-5. Vector retriever searches chunks linked to graph candidates and the global corpus.
-6. Reranker selects evidence.
-7. Context builder packages snippets, citations, and graph paths.
-8. Answer service generates the final response.
-9. Validator checks citation coverage and unsupported claims.
-10. Answer and metrics are stored.
+## Retrieval Flow
 
-## Ingestion Sequence
+1. The user submits a question to `POST /ask`.
+2. The retrieval service builds a query plan: intent, entity mentions, required
+   evidence types, and optional time constraints.
+3. Entity linking maps query mentions to graph nodes.
+4. Graph expansion finds relevant multi-hop neighborhoods.
+5. Vector search retrieves candidate chunks from graph-linked and global text.
+6. Results are merged and reranked.
+7. The answer service builds a cited evidence packet.
+8. The configured answer provider returns a grounded answer or refusal.
+9. The answer, citations, reasoning path, confidence, and limitations are stored.
 
-1. Upload file or import dataset.
-2. Create ingestion job.
-3. Parse into normalized document records.
-4. Chunk text with metadata.
+## Ingestion Flow
+
+1. Upload text or files, or prepare the demo import corpus.
+2. Create an ingestion job.
+3. Parse records into normalized documents.
+4. Chunk document content with metadata.
 5. Extract entities and relations.
-6. Canonicalize and deduplicate entities.
-7. Upsert graph nodes and edges.
-8. Embed chunks.
-9. Update job status and errors.
+6. Validate relations against the ontology.
+7. Upsert SQL records and graph edges.
+8. Generate and store embeddings.
+9. Update job status and per-record errors.
 
-## MVP Deployment
+## Reliability Principles
 
-Use Docker Compose locally:
-
-- `api`
-- `postgres`
-- `redis`
-- `web`
-
-Production can split the same boundaries into separate services later.
-
+- Local tests must not require external services.
+- Production must not run with SQLite, deterministic embeddings, deterministic
+  LLM behavior, wildcard CORS, or missing Neptune configuration.
+- Answers must expose citations and graph reasoning paths.
+- Unsupported or weakly supported questions should refuse rather than fabricate.
+- Human graph corrections must be auditable.

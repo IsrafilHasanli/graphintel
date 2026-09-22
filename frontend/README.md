@@ -1,99 +1,91 @@
 # GraphIntel Frontend
 
-Operational UI for the GraphIntel Graph RAG platform (support & incident
-intelligence). Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind,
-and React Flow.
+The GraphIntel frontend is a Next.js application for support and incident
+intelligence workflows. It provides dashboards, question answering, graph
+exploration, ingestion views, entity review, and evaluation screens.
 
-## Screens
+## Stack
 
-| Route         | Purpose                                                                 |
-| ------------- | ----------------------------------------------------------------------- |
-| `/`           | Dashboard: corpus/graph counts, entity coverage, release-gate, seed.    |
-| `/ask`        | Ask a question; answer + confidence + citations + reasoning path.       |
-| `/graph`      | Interactive React Flow graph explorer (browse or expand from a seed).   |
-| `/entities`   | Entity review: edit, merge, inspect relations, add/delete relations.    |
-| `/upload`     | Upload a file or paste text; shows the resulting ingestion job.         |
-| `/jobs`       | Ingestion jobs list with state badges and per-job error drill-down.     |
-| `/evaluation` | Run golden-question evals, view metrics and the release gate.           |
+- Next.js 16 App Router
+- React 19
+- TypeScript
+- Tailwind CSS
+- React Flow
+- Vitest and React Testing Library
+- Playwright smoke tests
 
-## Prerequisites
+## Routes
 
-- Node.js 20+
-- The GraphIntel FastAPI backend running and reachable at
-  `NEXT_PUBLIC_API_BASE` (default `http://localhost:8000`).
+| Route | Purpose |
+| --- | --- |
+| `/` | Dashboard with corpus metrics, graph counts, release-gate status, and seed action |
+| `/ask` | Ask operational questions and inspect confidence, citations, reasoning path, actions, and limitations |
+| `/graph` | Explore or expand graph neighborhoods from seed entities |
+| `/entities` | Review, edit, merge, and correct entities and relations |
+| `/upload` | Upload files or paste text for ingestion |
+| `/jobs` | Inspect ingestion job state and per-job errors |
+| `/evaluation` | Run golden-question evaluations and review release-gate status |
 
 ## Configuration
 
-`NEXT_PUBLIC_API_BASE` sets the backend base URL. It is inlined at build time,
-so rebuild after changing it.
+`NEXT_PUBLIC_API_BASE` defines the backend API base URL. The value is inlined at
+build time.
 
 ```bash
-cp .env.local.example .env.local   # optional; edit if backend is elsewhere
+cp .env.local.example .env.local
 ```
 
-## Run locally
+The default backend URL is `http://localhost:8000`.
+
+## Development
 
 ```bash
 npm install
-npm run dev            # http://localhost:3000
+npm run dev
 ```
 
-The dashboard is the landing screen. If you see empty states, click
-**Seed demo data** (POST `/admin/seed`) to load the deterministic demo corpus,
-then try the golden questions on `/ask`.
+Open `http://localhost:3000`. Start the backend first, then seed demo data from
+the dashboard or with `POST /admin/seed`.
 
 ## Scripts
 
-```bash
-npm run dev        # dev server
-npm run build      # production build (Next standalone output)
-npm run start      # serve the production build
-npm run lint       # ESLint 9 flat config with Next core-web-vitals
-npm run typecheck  # tsc --noEmit
-npm run test       # Vitest unit/component tests
-npm run e2e        # Playwright smoke tests (needs the app + backend running)
-```
-
-### Playwright
-
-```bash
-npx playwright install    # one-time browser download
-npm run start &           # or: npm run dev &
-npm run e2e
-```
-
-Set `E2E_BASE_URL` to target a non-default frontend URL.
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start the development server |
+| `npm run build` | Create a production build |
+| `npm run start` | Serve the production build |
+| `npm run lint` | Run ESLint 9 flat config with Next core-web-vitals |
+| `npm run typecheck` | Run TypeScript without emitting files |
+| `npm run test` | Run Vitest unit/component tests |
+| `npm run e2e` | Run Playwright smoke tests |
 
 ## Docker
-
-Multi-stage build (node:20-alpine) using Next.js standalone output.
 
 ```bash
 docker build \
   --build-arg NEXT_PUBLIC_API_BASE=http://localhost:8000 \
   -t graphintel-frontend .
+
 docker run -p 3000:3000 graphintel-frontend
 ```
 
-The repository `docker-compose.yml` builds this directory as the `web` service.
+The repository-level `docker-compose.yml` builds this app as the `web` service.
 
-## Architecture notes
+## Code Organization
 
-- `lib/api.ts` — single typed fetch wrapper; reads `NEXT_PUBLIC_API_BASE`,
-  builds URLs (array params repeat keys for `/graph/expand?seed=`), and throws
-  a typed `ApiError` carrying HTTP status + parsed body (used to surface 422
-  ontology violations).
-- `lib/types.ts` — TypeScript types mirroring the backend contract.
-- `lib/useAsync.ts` — abortable data-loading hook powering loading/empty/error
-  states across every data view.
-- `components/ui/*` — small Tailwind design system (Badge, Card, Button, Table,
-  Field, Modal, StateView).
-- Accessibility: semantic landmarks, labelled controls, keyboard-operable rows
-  and dialogs, `aria-live` regions for async answers/results, visible focus
-  rings, and a skip-to-content link.
+| Path | Purpose |
+| --- | --- |
+| `app/` | Route-level screens |
+| `components/` | Product and shared UI components |
+| `components/ui/` | Small Tailwind UI primitives |
+| `lib/api.ts` | Typed API client and error handling |
+| `lib/types.ts` | Types mirroring backend API contracts |
+| `lib/useAsync.ts` | Abortable async loading hook |
+| `tests/unit/` | Component and API-client unit tests |
+| `e2e/` | Playwright smoke spec |
 
-## UI states
+## UX Expectations
 
-Every data view implements loading, empty, error, and success states via
-`AsyncView`. The Ask answer additionally renders partial-evidence (limitations)
-and insufficient-evidence (refusal, red styling) states distinctly.
+Every data view should provide loading, empty, error, and success states. Answer
+views should clearly distinguish grounded answers, partial evidence, and
+insufficient evidence/refusal states.

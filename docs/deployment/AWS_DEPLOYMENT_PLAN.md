@@ -1,141 +1,113 @@
-# GraphIntel AWS Deployment Plan
+# AWS Deployment Plan
 
-## Goal
+This document describes the intended AWS deployment model for GraphIntel. Local
+development remains offline and reproducible; staging and production should use
+managed AWS services and real model providers.
 
-Deploy GraphIntel to AWS in a production-friendly way while keeping the local
-developer experience simple and reproducible.
+## Target Architecture
 
-## Local Development
-
-The local stack should run with Docker Compose:
-
-- `web`
-- `api`
-- `postgres`
-- `redis`
-
-Local development may support deterministic behavior for tests, but AWS
-production/staging must use real providers and managed services.
-
-## AWS Target Architecture
-
-| Component | AWS Service |
+| Component | AWS service |
 | --- | --- |
-| Frontend | ECS Fargate service behind ALB, or S3/CloudFront if exported static |
+| Frontend | ECS Fargate service behind ALB |
 | API | ECS Fargate service behind ALB |
-| Worker | ECS Fargate service without public ingress |
-| Relational DB | RDS PostgreSQL |
-| Vector Search | pgvector in PostgreSQL or another real vector backend |
-| Graph Database | Amazon Neptune |
-| Job Queue | ElastiCache Redis |
-| Raw Files | S3 |
-| Container Registry | ECR |
-| Secrets | Secrets Manager or SSM Parameter Store |
-| Logs/Metrics | CloudWatch |
+| Relational database | RDS PostgreSQL |
+| Graph database | Amazon Neptune |
+| Cache / job coordination | ElastiCache Redis |
+| Raw documents | S3 |
+| Container registry | ECR |
+| Secrets | AWS Secrets Manager |
+| Logs and metrics | CloudWatch |
 | TLS | ACM certificate on ALB |
 
-## No-Mock Production Rule
+## Runtime Requirements
 
-AWS production/staging must not use:
+Production and staging must not use local-only substitutes:
 
-- SQLite
-- in-memory graph storage
-- deterministic mock LLM
-- hash/deterministic embeddings
-- local filesystem object storage
-- local Redis substitutes
+- no SQLite
+- no SQL graph backend
+- no deterministic LLM provider
+- no deterministic embeddings
+- no wildcard CORS
+- no local filesystem document storage
 
-AWS production/staging must use:
+Required environment configuration:
 
-- Amazon Neptune for graph database and graph traversal
-- RDS PostgreSQL for relational data
-- pgvector or another real vector backend for vector search
-- a real LLM provider for answer generation
-- a real embedding provider for embeddings
+| Variable | Requirement |
+| --- | --- |
+| `GRAPHINTEL_ENV` | `staging` or `production` |
+| `DATABASE_URL` | RDS PostgreSQL DSN from Secrets Manager |
+| `GRAPH_BACKEND` | `neptune` |
+| `NEPTUNE_ENDPOINT` | Terraform Neptune endpoint output |
+| `NEPTUNE_PORT` | `8182` unless the cluster uses a different port |
+| `LLM_PROVIDER` | real provider, for example `anthropic` |
+| `EXTRACTION_PROVIDER` | `llm` |
+| `EMBEDDING_PROVIDER` | `bedrock`, `fastembed`, or `voyage` |
+| `CORS_ALLOW_ORIGINS` | explicit frontend origin list |
+
+## Infrastructure
+
+Terraform assets live in `infra/terraform` and provision:
+
+- VPC, public/private subnets, routing, and security groups
+- ECR repositories
+- RDS PostgreSQL with pgvector support
+- Amazon Neptune cluster and instances
 - ElastiCache Redis
-- S3
+- S3 document bucket
+- Secrets Manager secrets
+- ALB and target groups
+- ECS cluster, task definition, and service
+- CloudWatch log group
+- IAM roles and policies
 
-## Required AWS Runtime Configuration
+See [infra/README.md](../../infra/README.md) for the operational runbook.
 
-- `GRAPH_BACKEND=neptune`
-- `NEPTUNE_ENDPOINT=<terraform neptune_endpoint output>`
-- `NEPTUNE_PORT=8182`
-- `NEPTUNE_USE_IAM_AUTH=true`
-- `LLM_PROVIDER=anthropic`
-- `EXTRACTION_PROVIDER=llm`
-- `EMBEDDING_PROVIDER=bedrock` or `voyage`
-- `DATABASE_URL` from Secrets Manager, pointing to RDS PostgreSQL
-- `ANTHROPIC_API_KEY` from Secrets Manager
-- `VOYAGE_API_KEY` from Secrets Manager only when Voyage is selected
+## Deployment Flow
 
-## Infrastructure-As-Code
-
-Use one of:
-
-- Terraform in `infra/terraform`
-- AWS CDK in `infra/aws-cdk`
-
-Terraform is preferred for broad portability unless the implementation team
-chooses CDK explicitly.
-
-## Required Deployment Files
-
-- `docker-compose.yml`
-- `.env.example`
-- service Dockerfiles
-- `infra/terraform/README.md`
-- `deploy/aws/README.md`
-- CI workflow
-- deploy workflow
-
-## Deployment Stages
-
-1. Build local Docker images.
-2. Run local stack and seed demo data.
-3. Run tests.
-4. Create AWS infrastructure.
+1. Run tests and builds locally or in CI.
+2. Validate Terraform formatting and provider schema.
+3. Apply Terraform to create infrastructure.
+4. Build API and web images.
 5. Push images to ECR.
-6. Deploy ECS services.
-7. Run database migrations.
-8. Seed optional demo data in staging.
-9. Run smoke tests.
-10. Configure alarms and log retention.
+6. Roll out ECS task definitions.
+7. Run smoke tests against the deployed API.
+8. Configure DNS, TLS, alarms, and dashboards.
 
-## Required Smoke Tests
+## CI/CD
 
-- API health endpoint returns OK.
-- Frontend loads.
-- Database connectivity works.
-- Neptune connectivity works.
-- Worker can process a small job.
-- Demo question returns cited answer in staging when seed data exists.
+The deploy workflow is intentionally gated. Without repository variables such as
+`AWS_DEPLOY_ROLE_ARN`, it exits without touching AWS. When configured, it uses
+GitHub OIDC to assume a deploy role, pushes images, updates ECS, waits for
+service stability, and runs the smoke test.
 
-## Security And Secrets
+## Smoke Tests
 
-- Never commit real API keys.
-- Store secrets in AWS Secrets Manager or SSM Parameter Store.
-- Use least-privilege task roles.
-- Keep RDS and Redis private.
-- Use TLS for public endpoints.
+Minimum post-deploy checks:
+
+- `GET /health` returns `ok`.
+- `GET /ready` returns `ready` with no production safety errors.
+- API can reach RDS.
+- API can reach Neptune.
+- Seeded demo question returns a cited answer in staging.
+- Frontend loads and can call the API.
+
+## Security
+
+- Store credentials only in Secrets Manager or equivalent secret storage.
+- Use least-privilege task and execution roles.
+- Keep RDS, Neptune, and Redis in private subnets.
+- Allow ingress to private services only from application security groups.
+- Use HTTPS for public traffic.
 - Restrict CORS to known frontend domains.
+- Keep Terraform state in a secure remote backend for team environments.
 
 ## Rollback
 
-Rollback must include:
+Rollback should use ECS task-definition revisions and retained ECR image tags.
+Avoid destructive migrations without snapshots. RDS and Neptune backups should
+be enabled before production launch.
 
-- Revert ECS task definition to previous version.
-- Keep previous ECR image tags.
-- Avoid destructive database migrations without backup.
-- Document restore path for RDS snapshots.
+## Teardown
 
-## Cleanup
-
-Non-production environments must include cleanup commands for:
-
-- ECS services
-- ECR images
-- ALB
-- RDS
-- Redis
-- S3 demo buckets
-- CloudWatch log groups
+Non-production environments should document teardown steps and expected costs.
+Neptune, NAT gateways, ALB, and RDS are the primary always-on cost drivers.
