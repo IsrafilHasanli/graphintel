@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# Everything here runs fully offline: no AWS credentials, no external services.
+# SQLite + in-process graph + deterministic embeddings/LLM.
+jobs:
+  backend:
+    name: Lint, test & validate demo data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e ".[dev,llm]"
+
+      - name: Lint (ruff)
+        run: ruff check backend scripts
+
+      - name: Build & validate demo data
+        run: |
+          python scripts/prepare_demo_data.py
+          python scripts/validate_demo_data.py
+
+      - name: Tests
+        run: pytest -q
+
+  docker:
+    name: Build API image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (no push)
+        run: docker build -f backend/Dockerfile -t graphintel-api:ci .
+
+  terraform:
+    name: Terraform fmt & validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.5"
+      - name: Format check
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+      - name: Validate
+        # `init -backend=false` + `validate` need no cloud credentials.
+        run: |
+          terraform -chdir=infra/terraform init -backend=false
+          terraform -chdir=infra/terraform validate
+
+  frontend:
+    name: Frontend unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install & test
+        working-directory: frontend
+        # Tolerant of a not-yet-scaffolded frontend so CI stays green during
+        # early development; hardens once package.json + tests exist.
+        run: |
+          if [ -f package.json ]; then
+            npm ci || npm install
+            npm run test --if-present -- --run
+          else
+            echo "frontend/ not yet present; skipping"
+          fi

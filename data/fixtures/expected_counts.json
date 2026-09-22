@@ -1,0 +1,15 @@
+{
+  "customers": 5,
+  "teams": 4,
+  "services": 8,
+  "error_signatures": 5,
+  "root_causes": 5,
+  "incidents": 10,
+  "incident_updates": 20,
+  "sla_contracts": 5,
+  "sla_clauses": 15,
+  "runbooks": 5,
+  "postmortems": 5,
+  "support_tickets": 50,
+  "relations": 240
+}

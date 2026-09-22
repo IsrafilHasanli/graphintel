@@ -1,0 +1,5 @@
+ticket_id,customer_id,subject,body,service_id,error_signature,priority,status,created_at,related_incident_id
+SUP-0001,CUST-acme,Checkout keeps timing out at the payment step,Multiple customers report the checkout request timed out when applying payment. We keep seeing 'checkout timeout' errors at peak hours. (ref CUST-acme),SVC-checkout,ERR-checkout-timeout,P1,resolved,2026-09-20T00:00:00+00:00,INC-0248
+SUP-0002,CUST-globex,Checkout keeps timing out at the payment step,Multiple customers report the checkout request timed out when applying payment. We keep seeing 'checkout timeout' errors at peak hours. (ref CUST-globex),SVC-checkout,ERR-checkout-timeout,P2,closed,2026-09-18T00:00:00+00:00,INC-0250
+SUP-0003,CUST-initech,Checkout keeps timing out at the payment step,Multiple customers report the checkout request timed out when applying payment. We keep seeing 'checkout timeout' errors at peak hours. (ref CUST-initech),SVC-checkout,ERR-checkout-timeout,P3,open,2026-09-16T00:00:00+00:00,
+SUP-BAD,CUST-acme,broken row

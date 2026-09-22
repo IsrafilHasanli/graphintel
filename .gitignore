@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Env
+.env
+.env.local
+
+# Archived local AI-development artifacts; do not publish.
+claude_moved/
+
+# Node / Next
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+
+# Data artifacts (generated; keep folder structure via .gitkeep)
+data/raw/*
+data/synthetic/*
+data/processed/*
+!data/**/.gitkeep
+
+# Local DB / misc
+*.sqlite3
+*.db
+.DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
+tf.plan
+# Real vars/backends may hold account-specific values; keep only the examples.
+infra/terraform/terraform.tfvars
+infra/terraform/backend.tf
+infra/terraform/*.auto.tfvars

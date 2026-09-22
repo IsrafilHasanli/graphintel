@@ -1,0 +1,145 @@
+{
+  "reference_date": "2026-09-21",
+  "questions": [
+    {
+      "id": "GQ-1",
+      "question": "Which customers were affected by Payment API incidents in the last 30 days?",
+      "intent": "impact_analysis",
+      "time_range_days": 30,
+      "required_evidence_types": [
+        "incident",
+        "support_ticket"
+      ],
+      "expected_entities": [
+        "CUST-acme",
+        "CUST-globex"
+      ],
+      "expected_evidence_ids": [
+        "INC-247",
+        "INC-0249",
+        "SVC-payment-api"
+      ],
+      "expected_answer_themes": [
+        "Payment API",
+        "affected customers",
+        "last 30 days"
+      ],
+      "expected_reasoning_edges": [
+        "Customer REPORTED SupportTicket",
+        "SupportTicket RELATED_TO Incident",
+        "Incident AFFECTED Service"
+      ]
+    },
+    {
+      "id": "GQ-2",
+      "question": "Is Acme Corp at SLA risk because of checkout or payment incidents?",
+      "intent": "sla_risk",
+      "time_range_days": null,
+      "required_evidence_types": [
+        "incident",
+        "sla_clause",
+        "support_ticket"
+      ],
+      "expected_entities": [
+        "CUST-acme",
+        "CLAUSE-acme-availability-99-9"
+      ],
+      "expected_evidence_ids": [
+        "INC-247",
+        "INC-0248",
+        "CLAUSE-acme-availability-99-9"
+      ],
+      "expected_answer_themes": [
+        "SLA risk",
+        "availability",
+        "Acme"
+      ],
+      "expected_reasoning_edges": [
+        "SLAContract APPLIES_TO Customer",
+        "SLAClause PART_OF SLAContract",
+        "SLAClause CONSTRAINS Service",
+        "Incident MAY_VIOLATE SLAClause"
+      ]
+    },
+    {
+      "id": "GQ-3",
+      "question": "Which engineering team owns the service involved in INC-247?",
+      "intent": "ownership",
+      "time_range_days": null,
+      "required_evidence_types": [
+        "incident",
+        "service",
+        "team"
+      ],
+      "expected_entities": [
+        "TEAM-backend-payments"
+      ],
+      "expected_evidence_ids": [
+        "INC-247",
+        "SVC-payment-api",
+        "TEAM-backend-payments"
+      ],
+      "expected_answer_themes": [
+        "Payments Platform",
+        "owns",
+        "Payment API"
+      ],
+      "expected_reasoning_edges": [
+        "Incident AFFECTED Service",
+        "Service OWNED_BY Team"
+      ]
+    },
+    {
+      "id": "GQ-4",
+      "question": "What is the likely root cause of recurring checkout timeout tickets?",
+      "intent": "root_cause",
+      "time_range_days": null,
+      "required_evidence_types": [
+        "support_ticket",
+        "incident",
+        "root_cause"
+      ],
+      "expected_entities": [
+        "RC-downstream-payment-latency"
+      ],
+      "expected_evidence_ids": [
+        "INC-0248",
+        "RC-downstream-payment-latency"
+      ],
+      "expected_answer_themes": [
+        "downstream payment latency",
+        "checkout timeout",
+        "root cause"
+      ],
+      "expected_reasoning_edges": [
+        "SupportTicket RELATED_TO Incident",
+        "Incident CAUSED_BY RootCause"
+      ]
+    },
+    {
+      "id": "GQ-5",
+      "question": "Which runbook should be used for payment gateway timeout errors?",
+      "intent": "runbook_lookup",
+      "time_range_days": null,
+      "required_evidence_types": [
+        "error_signature",
+        "runbook"
+      ],
+      "expected_entities": [
+        "RUN-payment-gateway-timeout"
+      ],
+      "expected_evidence_ids": [
+        "ERR-payment-gateway-timeout",
+        "RUN-payment-gateway-timeout"
+      ],
+      "expected_answer_themes": [
+        "payment gateway timeout",
+        "runbook",
+        "mitigation"
+      ],
+      "expected_reasoning_edges": [
+        "Runbook MITIGATES ErrorSignature"
+      ]
+    }
+  ]
+}

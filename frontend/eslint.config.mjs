@@ -1,0 +1,21 @@
+import coreWebVitals from "eslint-config-next/core-web-vitals";
+
+const config = [
+  ...coreWebVitals,
+  {
+    ignores: [
+      ".next/**",
+      "coverage/**",
+      "e2e/**",
+      "next-env.d.ts",
+      "node_modules/**",
+      "playwright-report/**",
+      "test-results/**",
+    ],
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
+];
+
+export default config;

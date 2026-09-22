@@ -1,0 +1,118 @@
+name: Deploy
+
+# Deploys the API image to ECS Fargate. This workflow is a NO-OP unless AWS
+# access is configured, satisfying the constraint that local development must
+# never require real AWS credentials. To enable it, set one repository variable
+# and (via OIDC) one secret:
+#   - vars.AWS_DEPLOY_ROLE_ARN : IAM role to assume via GitHub OIDC
+#   - vars.AWS_REGION          : e.g. us-east-1
+#   - vars.ECS_CLUSTER         : output ecs_cluster_name from Terraform
+#   - vars.ECS_SERVICE         : output ecs_api_service_name
+#   - vars.ECR_API_REPOSITORY  : output ecr_api_repository_url
+# With none of these set the "preflight" gate short-circuits every cloud step.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (defaults to commit SHA)"
+        required: false
+
+permissions:
+  id-token: write   # for OIDC role assumption
+  contents: read
+
+jobs:
+  preflight:
+    name: Check deploy is configured
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        run: |
+          if [ -n "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Deploy target configured -> proceeding."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_DEPLOY_ROLE_ARN not set; skipping cloud deploy (assets built & documented only)."
+          fi
+
+  deploy:
+    name: Build, push & roll out
+    needs: preflight
+    if: needs.preflight.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image tag
+        id: tag
+        run: echo "tag=${{ github.event.inputs.image_tag || github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push API image
+        env:
+          REPO: ${{ vars.ECR_API_REPOSITORY }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          docker build -f backend/Dockerfile -t "$REPO:$TAG" -t "$REPO:latest" .
+          docker push "$REPO:$TAG"
+          docker push "$REPO:latest"
+
+      - name: Render new task definition
+        id: taskdef
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+          REPO: ${{ vars.ECR_API_REPOSITORY }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          # Pull the live task def, swap the image, strip read-only fields.
+          aws ecs describe-task-definition \
+            --task-definition "$(aws ecs describe-services --cluster "$CLUSTER" --services "$SERVICE" \
+              --query 'services[0].taskDefinition' --output text)" \
+            --query 'taskDefinition' > taskdef.json
+          python - <<'PY'
+          import json
+          d = json.load(open("taskdef.json"))
+          for k in ["taskDefinitionArn","revision","status","requiresAttributes",
+                    "compatibilities","registeredAt","registeredBy"]:
+              d.pop(k, None)
+          import os
+          repo, tag = os.environ["REPO"], os.environ["TAG"]
+          for c in d["containerDefinitions"]:
+              if c["name"] == "api":
+                  c["image"] = f"{repo}:{tag}"
+          json.dump(d, open("taskdef.new.json", "w"))
+          PY
+          echo "path=taskdef.new.json" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to ECS (waits for stable, rolls back on failure)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.taskdef.outputs.path }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
+
+      - name: Smoke test the live service
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+        run: |
+          ALB=$(aws elbv2 describe-load-balancers \
+            --query "LoadBalancers[?contains(LoadBalancerName, '${{ vars.ECS_CLUSTER }}')].DNSName | [0]" \
+            --output text)
+          BASE="http://$ALB" bash infra/smoke_test.sh
